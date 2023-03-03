@@ -777,6 +777,8 @@ enqueue_task_bt(struct rq *rq, struct task_struct *p, int flags)
 		rq->bt_nr_running++;
 		add_nr_running(rq, 1);
 	}
+
+	printk(">>> CPU%d, task %d enqueue, bt_rq have %d task\n", rq->cpu, p->pid, bt_rq->nr_running);
 }
 
 static void set_next_buddy_bt(struct sched_entity *se);
@@ -818,6 +820,8 @@ static void dequeue_task_bt(struct rq *rq, struct task_struct *p, int flags)
 		sub_nr_running(rq, 1);
 		rq->bt_nr_running--;
 	}
+	
+	printk("<<< CPU%d, task %d dequeue, bt_rq have %d task\n", rq->cpu, p->pid, bt_rq->nr_running);
 }
 
 #ifdef CONFIG_SMP
@@ -1132,7 +1136,7 @@ static struct task_struct *pick_next_task_bt(struct rq *rq, struct task_struct *
 	bt_rq = &rq->bt;
 again:
 	if (!bt_rq->nr_running)
-		goto idle;
+		return NULL;
 
 	put_prev_task(rq, prev);
 
@@ -1204,7 +1208,7 @@ static void yield_task_bt(struct rq *rq)
 	 * and double the fastpath cost.
 	 */
 //	 rq->skip_clock_update = 1;
-
+	// 将主动让出 cpu 的进程设置为 skip，避免接下去 pick 时又选到他
 	set_skip_buddy_bt(se);
 }
 

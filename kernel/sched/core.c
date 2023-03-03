@@ -4086,8 +4086,10 @@ static void __setscheduler(struct rq *rq, struct task_struct *p,
 	else if (rt_prio(p->prio))
 		p->sched_class = &rt_sched_class;
 #ifdef CONFIG_BT_SCHED
-	else if (bt_prio(p->prio))
+	else if (bt_prio(p->prio)) {
 		p->sched_class = &bt_sched_class;
+		printk("task %d set scheduler to bt\n", p->pid);
+	}
 #endif
 	else
 		p->sched_class = &fair_sched_class;
@@ -4125,9 +4127,10 @@ static int __sched_setscheduler(struct task_struct *p,
 
 	/* The pi code expects interrupts enabled */
 	BUG_ON(pi && in_interrupt());
-
+#ifdef CONFIG_BT_SCHED
 	if(!sched_bt_on && SCHED_BT == policy)
 		return -EINVAL;
+#endif
 
 recheck:
 	/* Double check policy once rq lock held: */

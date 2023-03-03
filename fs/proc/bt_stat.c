@@ -123,7 +123,7 @@ static int show_bt_stat(struct seq_file *p, void *v)
 		"procs_blocked %lu\n",
 		nr_context_switches(),
 		(unsigned long)jif,
-		nr_forks(),
+		total_forks,
 		nr_running(),
 		nr_iowait());
 

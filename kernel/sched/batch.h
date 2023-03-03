@@ -20,8 +20,9 @@
 
 struct bt_rq {
 	struct load_weight load;
-	unsigned int nr_running, h_nr_running;
-	unsigned long nr_uninterruptible;
+	unsigned int nr_running,  // 队列中调度实体个数
+								h_nr_running; // 队列中所有调度实体数量，展开 task_group 的值
+	unsigned long nr_uninterruptible; // 不可中断进程数量，用于计算负载
 
 	u64 exec_clock;
 	u64 min_vruntime;
@@ -29,8 +30,8 @@ struct bt_rq {
 	u64 min_vruntime_copy;
 #endif
 
-	struct rb_root_cached tasks_timeline;
-	struct rb_node *rb_leftmost;
+	struct rb_root_cached tasks_timeline; // 红黑树，存储就绪任务
+	struct rb_node *rb_leftmost; // 红黑树上最左边的节点，下一个被运行的任务
 
 	/*
 	 * 'curr' points to currently running entity on this bt_rq.
