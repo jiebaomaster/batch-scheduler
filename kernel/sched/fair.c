@@ -4346,8 +4346,13 @@ void unthrottle_cfs_rq(struct cfs_rq *cfs_rq)
 		add_nr_running(rq, task_delta);
 
 	/* determine whether we need to wake up potentially idle cpu */
-	if (rq->curr == rq->idle && rq->cfs.nr_running)
+#ifdef CONFIG_BT_SCHED
+	if ((rq->curr == rq->idle || bt_prio(rq->curr->prio)) && rq->cfs.nr_running) {
+#else
+	if (rq->curr == rq->idle && rq->cfs.nr_running) {
+#endif
 		resched_curr(rq);
+	}
 }
 
 static u64 distribute_cfs_runtime(struct cfs_bandwidth *cfs_b,
@@ -5714,7 +5719,11 @@ static int select_idle_core(struct task_struct *p, struct sched_domain *sd, int 
 
 		for_each_cpu(cpu, cpu_smt_mask(core)) {
 			cpumask_clear_cpu(cpu, cpus);
+#ifdef CONFIG_BT_SCHED
+			if (!idle_bt_cpu(cpu))
+#else
 			if (!idle_cpu(cpu))
+#endif
 				idle = false;
 		}
 
@@ -5743,7 +5752,11 @@ static int select_idle_smt(struct task_struct *p, struct sched_domain *sd, int t
 	for_each_cpu(cpu, cpu_smt_mask(target)) {
 		if (!cpumask_test_cpu(cpu, &p->cpus_allowed))
 			continue;
+#ifdef CONFIG_BT_SCHED
+		if (idle_bt_cpu(cpu))
+#else
 		if (idle_cpu(cpu))
+#endif
 			return cpu;
 	}
 
@@ -5806,7 +5819,11 @@ static int select_idle_cpu(struct task_struct *p, struct sched_domain *sd, int t
 			return -1;
 		if (!cpumask_test_cpu(cpu, &p->cpus_allowed))
 			continue;
+#ifdef CONFIG_BT_SCHED
+		if (idle_bt_cpu(cpu))
+#else
 		if (idle_cpu(cpu))
+#endif
 			break;
 	}
 
@@ -5826,13 +5843,21 @@ static int select_idle_sibling(struct task_struct *p, int prev, int target)
 	struct sched_domain *sd;
 	int i;
 
+#ifdef CONFIG_BT_SCHED
+	if (idle_bt_cpu(target))
+#else
 	if (idle_cpu(target))
+#endif
 		return target;
 
 	/*
 	 * If the previous cpu is cache affine and idle, don't be stupid.
 	 */
+#ifdef CONFIG_BT_SCHED
+	if (prev != target && cpus_share_cache(prev, target) && idle_bt_cpu(prev))
+#else
 	if (prev != target && cpus_share_cache(prev, target) && idle_cpu(prev))
+#endif
 		return prev;
 
 	sd = rcu_dereference(per_cpu(sd_llc, target));
@@ -7441,7 +7466,11 @@ static inline void update_sg_lb_stats(struct lb_env *env,
 		/*
 		 * No need to call idle_cpu() if nr_running is not 0
 		 */
+#ifdef CONFIG_BT_SCHED
+		if (!nr_running && idle_bt_cpu(i))
+#else
 		if (!nr_running && idle_cpu(i))
+#endif
 			sgs->idle_cpus++;
 	}
 
@@ -8475,7 +8504,11 @@ out:
 		this_rq->next_balance = next_balance;
 
 	/* Is there a task of a high priority class? */
+#ifdef CONFIG_BT_SCHED
+	if (this_rq->nr_running - this_rq->bt_nr_running != this_rq->cfs.h_nr_running)
+#else
 	if (this_rq->nr_running != this_rq->cfs.h_nr_running)
+#endif
 		pulled_task = -1;
 
 	if (pulled_task)
@@ -8786,7 +8819,11 @@ static void rebalance_domains(struct rq *rq, enum cpu_idle_type idle)
 				 * env->dst_cpu, so we can't know our idle
 				 * state even if we migrated tasks. Update it.
 				 */
+#ifdef CONFIG_BT_SCHED
+				idle = idle_bt_cpu(cpu) ? CPU_IDLE : CPU_NOT_IDLE;
+#else
 				idle = idle_cpu(cpu) ? CPU_IDLE : CPU_NOT_IDLE;
+#endif
 			}
 			sd->last_balance = jiffies;
 			interval = get_sd_balance_interval(sd, idle != CPU_IDLE);

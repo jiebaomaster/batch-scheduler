@@ -19,7 +19,7 @@
 
 
 struct bt_rq {
-	struct load_weight load;
+	struct load_weight load; // 队列中所有调度实体的权重
 	unsigned int nr_running,  // 队列中调度实体个数
 								h_nr_running; // 队列中所有调度实体数量，展开 task_group 的值
 	unsigned long nr_uninterruptible; // 不可中断进程数量，用于计算负载

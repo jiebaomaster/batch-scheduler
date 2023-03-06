@@ -3089,7 +3089,11 @@ void scheduler_tick(void)
 	perf_event_task_tick();
 
 #ifdef CONFIG_SMP
+#ifdef CONFIG_BT_SCHED
+	rq->idle_balance = idle_bt_cpu(cpu);
+#else
 	rq->idle_balance = idle_cpu(cpu);
+#endif
 	trigger_load_balance(rq);
 #endif
 	rq_last_tick_reset(rq);
@@ -3981,6 +3985,31 @@ inline int task_nice(const struct task_struct *p)
 }
 EXPORT_SYMBOL(task_nice);
 
+#ifdef CONFIG_BT_SCHED
+/**
+ * idle_bt_cpu - is a given cpu idle or bt task currently?
+ * 防止 batch 的负载对 cfs 造成干扰
+ * @cpu: the processor in question.
+ */
+int idle_bt_cpu(int cpu)
+{
+	struct rq *rq = cpu_rq(cpu);
+
+	if (rq->curr != rq->idle && !bt_prio(rq->curr->prio))
+		return 0;
+
+	if (rq->nr_running - rq->bt_nr_running)
+		return 0;
+
+#ifdef CONFIG_SMP
+	if (!llist_empty(&rq->wake_list))
+		return 0;
+#endif
+
+	return 1;
+}
+#endif
+
 /**
  * idle_cpu - is a given CPU idle currently?
  * @cpu: the processor in question.
@@ -4128,8 +4157,10 @@ static int __sched_setscheduler(struct task_struct *p,
 	/* The pi code expects interrupts enabled */
 	BUG_ON(pi && in_interrupt());
 #ifdef CONFIG_BT_SCHED
-	if(!sched_bt_on && SCHED_BT == policy)
+	if(!sched_bt_on && SCHED_BT == policy) {
+		printk("sched_bt_on off\n");
 		return -EINVAL;
+	}
 #endif
 
 recheck:

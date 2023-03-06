@@ -18,6 +18,7 @@
 #include <linux/migrate.h>
 #include <linux/task_work.h>
 #include <linux/sched/batch.h>
+#include <linux/sched/mm.h>
 
 #include <trace/events/sched.h>
 #include "batch.h"
@@ -728,9 +729,50 @@ static void put_prev_bt_entity(struct bt_rq *bt_rq, struct sched_entity *prev)
 	bt_rq->curr = NULL;
 }
 
+#define DIFF_MIN 1000
+
+// 由进程的占用资源变化动态调整进程的优先级
+static void __update_curr_weight(struct sched_entity *bt_se, struct bt_rq *bt_rq) {
+	// 判断是否到下一次调整时间
+	if (time_before(jiffies, bt_se->next_adjust))
+		return;
+
+	bt_se->next_adjust = jiffies + 2*HZ;
+
+	struct task_struct* p = bt_task_of(bt_se);
+	// (rss, disk_out, disk_in)
+
+	if (bt_se->last_rss == 0) {
+		bt_se->last_rss = get_mm_rss(p->mm);
+		return;
+	}
+
+	unsigned long cur_rss = get_mm_rss(p->mm);
+
+	if (cur_rss - bt_se->last_rss > DIFF_MIN && p->static_prio != MIN_BT_PRIO) {
+		p->static_prio--; 
+		bt_se->last_rss = cur_rss;
+		update_load_sub(&bt_rq->load, bt_se->load.weight);
+		set_bt_load_weight(p);
+		update_load_add(&bt_rq->load, bt_se->load.weight);
+
+		printk("pid %d prio inc to %d\n", p->pid, p->static_prio);
+	} else if((bt_se->last_rss - cur_rss > DIFF_MIN) && p->static_prio != MAX_BT_PRIO) {
+		p->static_prio++;
+		bt_se->last_rss = cur_rss;
+		update_load_sub(&bt_rq->load, bt_se->load.weight);
+		set_bt_load_weight(p);
+		update_load_add(&bt_rq->load, bt_se->load.weight);
+
+		printk("pid %d prio dec to %d\n", p->pid, p->static_prio);
+	}
+}
+
 static void
 bt_entity_tick(struct bt_rq *bt_rq, struct sched_entity *curr, int queued)
 {
+	__update_curr_weight(curr, bt_rq);
+
 	/*
 	 * Update run-time bt_statistics of the 'current'.
 	 */
@@ -847,7 +889,7 @@ static int idle_cpu_bt(int cpu)
 	return 1;
 }
 
-static int select_idle_sibling_bt(struct task_struct *p, int target)
+static int select_idle_cpu(struct task_struct *p, int target)
 {
 	struct sched_domain *sd;
 	struct sched_group *sg;
@@ -889,10 +931,10 @@ done:
 	return target;
 }
 
-static int select_idle_cpu(struct task_struct *p, int target)
-{
-	struct sched_domain *sd;
-	struct sched_group *sg;
+static int select_idlest_cpu(struct task_struct *p, int target) {
+	unsigned int cpu;
+  unsigned int min_load = 666666666;
+
 	int i = task_cpu(p);
 
 	if (idle_cpu_bt(target))
@@ -904,32 +946,17 @@ static int select_idle_cpu(struct task_struct *p, int target)
 	if (i != target && cpus_share_cache(i, target) && idle_cpu_bt(i))
 		return i;
 
-	/*
-	 * Otherwise, iterate the domains and find an elegible idle cpu.
-	 */
-	sd = rcu_dereference(per_cpu(sd_llc, target));
-	for_each_lower_domain(sd) {
-		sg = sd->groups;
-		do {
-			if (!cpumask_intersects(sched_group_cpus(sg),
-						tsk_cpus_allowed(p)))
-				goto next;
-
-			for_each_cpu(i, sched_group_cpus(sg)) {
-				if (idle_cpu_bt(i) && cpumask_test_cpu(i, tsk_cpus_allowed(p))) {
-					target = i;
-					goto done;
-				}
-			}
-next:
-			sg = sg->next;
-		} while (sg != sd->groups);
+  for_each_online_cpu(cpu){
+    struct rq *rq = cpu_rq(cpu);
+		unsigned long rq_load = rq->cfs.runnable_load_avg + rq->bt.load.weight;
+    if (rq_load < min_load && cpumask_test_cpu(cpu, &p->cpus_allowed)){
+      target = cpu;
+      min_load = rq_load;
+    }
 	}
 
-done:
-	return target;
+  return target;
 }
-
 
 static int
 select_task_rq_bt(struct task_struct *p, int prev_cpu, int sd_flag, int wake_flags)
@@ -939,43 +966,13 @@ select_task_rq_bt(struct task_struct *p, int prev_cpu, int sd_flag, int wake_fla
 	int new_cpu = prev_cpu;
 	int want_affine = 0;
 
-	if (p->nr_cpus_allowed == 1)
-		return prev_cpu;
-
-	if (sd_flag & SD_BALANCE_WAKE) {
-		if (cpumask_test_cpu(cpu, tsk_cpus_allowed(p)))
-			want_affine = 1;
-		new_cpu = prev_cpu;
-	}
-
 	rcu_read_lock();
-	for_each_domain(cpu, tmp) {
-		if (!(tmp->flags & SD_LOAD_BALANCE))
-			continue;
-
-		/*
-		 * If both cpu and prev_cpu are part of this domain,
-		 * cpu is a valid SD_WAKE_AFFINE target.
-		 */
-		if (want_affine && (tmp->flags & SD_WAKE_AFFINE) &&
-			cpumask_test_cpu(prev_cpu, sched_domain_span(tmp))) {
-			affine_sd = tmp;
-			break;
-		}
-
-		if (tmp->flags & sd_flag)
-			sd = tmp;
-	}
-
-	if (affine_sd) {
-		new_cpu = select_idle_sibling_bt(p, prev_cpu);
-		goto unlock;
-	}
-
-	new_cpu = select_idle_cpu(p, prev_cpu);
+	new_cpu = select_idlest_cpu(p, prev_cpu);
 
 unlock:
 	rcu_read_unlock();
+
+	printk("select cpu %d for task %d\n", new_cpu, p->pid);
 
 	return new_cpu;
 }
@@ -1126,6 +1123,103 @@ preempt:
 		set_last_buddy_bt(se);
 }
 
+struct rq *find_busiest_rq(int this_cpu){
+	int target_cpu = -1;
+  int cpu = 0;
+  struct rq *target_rq = NULL;
+	struct rq *rq;
+	unsigned long max_load = 0;
+
+	for_each_online_cpu(cpu){
+		if (cpu == this_cpu) continue;
+
+    rq = cpu_rq(cpu);
+		if (rq->bt.nr_running < 1) continue;
+
+		unsigned long rq_load = rq->cfs.runnable_load_avg + rq->bt.load.weight;
+    if (rq_load > max_load){
+			target_cpu = cpu;
+      target_rq = rq;
+      max_load = rq_load;
+    }
+	}
+	// printk("for cpu %d , find busiest cpu %d\n", this_cpu, target_cpu);
+
+  return target_rq;
+}
+
+bool is_migrate_task(struct task_struct *task, struct rq *this_rq, struct rq *target_rq){
+   if(!cpumask_test_cpu(this_rq->cpu, &task->cpus_allowed))
+      return false;
+   if(task_running(target_rq, task)) //task_running开启了SMP时判断on_cpu字段
+      return false;
+   return true;
+}
+
+/*
+   到一个就绪队列最长的cpu，从中挑选一个进程迁移到this_rq.
+   不会出现说cpu0想在cpu1获取进程，cpu1想在cpu0获取进程的情况从而不会引发死锁. 
+   因为目标是找到最长的rq，而要出现上述情况两个rq必须一样长，但是其中一个为0，因此不可能出现
+*/
+static int idle_balance_bt(struct rq *this_rq, struct rq_flags *rf){
+  int this_cpu = this_rq->cpu;
+  int pulled_task = 0;
+
+  if (!cpu_active(this_cpu))
+		return 0;
+	
+  struct rq *busiest = find_busiest_rq(this_cpu);
+  if(!busiest)
+    return 0;
+	printk("for cpu %d , find busiest cpu %d\n", this_cpu, busiest->cpu);
+
+	raw_spin_unlock(&this_rq->lock);
+	printk("unlock\n");
+	double_rq_lock(this_rq, busiest);
+      
+  struct sched_entity *bt_se;
+  struct task_struct *migrate_task = NULL;	
+	unsigned long max_weight = 0;
+
+	struct rb_root *root = &(busiest->bt.tasks_timeline.rb_root);
+  struct rb_node *node;
+	printk("start iterator rbtree\n");
+	for (node = rb_first(root); node; node = rb_next(node)) {
+    bt_se = rb_entry(node, struct sched_entity, run_node);
+    struct task_struct *p = container_of(bt_se, struct task_struct, bt);
+      
+    if (is_migrate_task(p, this_rq, busiest) && (bt_se->load.weight > max_weight)){
+      migrate_task = p;
+			max_weight = bt_se->load.weight;
+			printk("cur migrate task %d, weight %lu\n", p->pid, max_weight);
+    }
+  }
+  if (migrate_task) {
+		printk("start migrate\n");
+    deactivate_task(busiest, migrate_task, 0);
+		printk("set_task_cpu\n");
+    // del_task->on_rq = TASK_ON_RQ_MIGRATING; //CFS中迁移进程的时候设置了这个状态位, 测试发现可以不加
+    set_task_cpu(migrate_task, this_cpu);
+		printk("activate_task\n");
+    activate_task(this_rq, migrate_task, 0);
+    // del_task->on_rq = TASK_ON_RQ_QUEUED; //CFS
+    pulled_task++;
+    // check_preempt_curr(this_rq, del_task, 0); //CFS
+		printk("pull pid %d from %d to %d \n", migrate_task->pid, busiest->cpu, this_cpu);
+  } else {
+		printk("pull nothing from %d to %d \n", busiest->cpu, this_cpu);
+	}
+
+  double_rq_unlock(this_rq, busiest);
+	raw_spin_lock(&this_rq->lock);
+  if (this_rq->nr_running != this_rq->bt.nr_running)
+		pulled_task = -1;
+	printk("balance compelate pulled %d\n", pulled_task);
+
+  return pulled_task;
+}
+
+
 static struct task_struct *pick_next_task_bt(struct rq *rq, struct task_struct *prev, struct rq_flags *rf)
 {
 	struct task_struct *p;
@@ -1135,20 +1229,16 @@ static struct task_struct *pick_next_task_bt(struct rq *rq, struct task_struct *
 
 	bt_rq = &rq->bt;
 again:
-	if (!bt_rq->nr_running)
-		return NULL;
+	if (bt_rq->nr_running) {
+		put_prev_task(rq, prev);
+		se = pick_next_bt_entity(bt_rq);
+		set_next_bt_entity(bt_rq, se);
+		p = bt_task_of(se);
+		p->bt.exec_start = rq->clock;
+		return p;
+	}
 
-	put_prev_task(rq, prev);
-
-	se = pick_next_bt_entity(bt_rq);
-	set_next_bt_entity(bt_rq, se);
-
-	p = bt_task_of(se);
-
-	return p;
-
-idle:
-	new_tasks = idle_balance(rq, rf);
+	new_tasks = idle_balance_bt(rq, rf);
 
 	/*
 	 * Because idle_balance() releases (and re-acquires) rq->lock, it is

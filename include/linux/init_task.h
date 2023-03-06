@@ -253,6 +253,10 @@ extern struct cred init_cred;
 	.se		= {						\
 		.group_node 	= LIST_HEAD_INIT(tsk.se.group_node),	\
 	},								\
+	.bt = {\
+		.last_rss = 0, \
+		.next_adjust = 0, \
+	},\
 	.rt		= {						\
 		.run_list	= LIST_HEAD_INIT(tsk.rt.run_list),	\
 		.time_slice	= RR_TIMESLICE,				\

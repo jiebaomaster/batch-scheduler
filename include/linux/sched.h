@@ -441,6 +441,8 @@ struct sched_entity {
 	struct sched_statistics		statistics;
 #ifdef	CONFIG_BT_SCHED
 	struct sched_statistics		*bt_statistics;
+	unsigned long last_rss;
+	unsigned long next_adjust; // 下一次权重调整的时间
 #endif
 
 #ifdef CONFIG_FAIR_GROUP_SCHED
@@ -1497,6 +1499,9 @@ extern int task_nice(const struct task_struct *p);
 extern int can_nice(const struct task_struct *p, const int nice);
 extern int task_curr(const struct task_struct *p);
 extern int idle_cpu(int cpu);
+#ifdef CONFIG_BT_SCHED
+extern int idle_bt_cpu(int cpu);
+#endif
 extern int sched_setscheduler(struct task_struct *, int, const struct sched_param *);
 extern int sched_setscheduler_nocheck(struct task_struct *, int, const struct sched_param *);
 extern int sched_setattr(struct task_struct *, const struct sched_attr *);
