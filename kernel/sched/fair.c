@@ -39,6 +39,7 @@
 #include "sched.h"
 #include "fair.h"
 #ifdef	CONFIG_BT_SCHED
+#include <linux/sched/batch.h>
 #include "batch.h"
 #endif
 
