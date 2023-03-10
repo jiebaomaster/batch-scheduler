@@ -756,7 +756,7 @@ static void __update_curr_weight(struct sched_entity *bt_se, struct bt_rq *bt_rq
 		set_bt_load_weight(p);
 		update_load_add(&bt_rq->load, bt_se->load.weight);
 
-		printk("pid %d prio inc to %d\n", p->pid, p->static_prio);
+		// printk("pid %d prio inc to %d\n", p->pid, p->static_prio);
 	} else if((bt_se->last_rss - cur_rss > DIFF_MIN) && p->static_prio != MAX_BT_PRIO) {
 		p->static_prio++;
 		bt_se->last_rss = cur_rss;
@@ -764,14 +764,14 @@ static void __update_curr_weight(struct sched_entity *bt_se, struct bt_rq *bt_rq
 		set_bt_load_weight(p);
 		update_load_add(&bt_rq->load, bt_se->load.weight);
 
-		printk("pid %d prio dec to %d\n", p->pid, p->static_prio);
+		// printk("pid %d prio dec to %d\n", p->pid, p->static_prio);
 	}
 }
 
 static void
 bt_entity_tick(struct bt_rq *bt_rq, struct sched_entity *curr, int queued)
 {
-	__update_curr_weight(curr, bt_rq);
+	// __update_curr_weight(curr, bt_rq);
 
 	/*
 	 * Update run-time bt_statistics of the 'current'.
@@ -820,7 +820,7 @@ enqueue_task_bt(struct rq *rq, struct task_struct *p, int flags)
 		add_nr_running(rq, 1);
 	}
 
-	printk(">>> CPU%d, task %d enqueue, bt_rq have %d task\n", rq->cpu, p->pid, bt_rq->nr_running);
+	// printk(">>> CPU%d, task %d enqueue, bt_rq have %d task\n", rq->cpu, p->pid, bt_rq->nr_running);
 }
 
 static void set_next_buddy_bt(struct sched_entity *se);
@@ -863,7 +863,7 @@ static void dequeue_task_bt(struct rq *rq, struct task_struct *p, int flags)
 		rq->bt_nr_running--;
 	}
 	
-	printk("<<< CPU%d, task %d dequeue, bt_rq have %d task\n", rq->cpu, p->pid, bt_rq->nr_running);
+	// printk("<<< CPU%d, task %d dequeue, bt_rq have %d task\n", rq->cpu, p->pid, bt_rq->nr_running);
 }
 
 #ifdef CONFIG_SMP
@@ -972,7 +972,7 @@ select_task_rq_bt(struct task_struct *p, int prev_cpu, int sd_flag, int wake_fla
 unlock:
 	rcu_read_unlock();
 
-	printk("select cpu %d for task %d\n", new_cpu, p->pid);
+	// printk("select cpu %d for task %d\n", new_cpu, p->pid);
 
 	return new_cpu;
 }
@@ -1171,10 +1171,10 @@ static int idle_balance_bt(struct rq *this_rq, struct rq_flags *rf){
   struct rq *busiest = find_busiest_rq(this_cpu);
   if(!busiest)
     return 0;
-	printk("for cpu %d , find busiest cpu %d\n", this_cpu, busiest->cpu);
+	// printk("for cpu %d , find busiest cpu %d\n", this_cpu, busiest->cpu);
 
 	raw_spin_unlock(&this_rq->lock);
-	printk("unlock\n");
+	// printk("unlock\n");
 	double_rq_lock(this_rq, busiest);
       
   struct sched_entity *bt_se;
@@ -1183,7 +1183,7 @@ static int idle_balance_bt(struct rq *this_rq, struct rq_flags *rf){
 
 	struct rb_root *root = &(busiest->bt.tasks_timeline.rb_root);
   struct rb_node *node;
-	printk("start iterator rbtree\n");
+	// printk("start iterator rbtree\n");
 	for (node = rb_first(root); node; node = rb_next(node)) {
     bt_se = rb_entry(node, struct sched_entity, run_node);
     struct task_struct *p = container_of(bt_se, struct task_struct, bt);
@@ -1191,30 +1191,30 @@ static int idle_balance_bt(struct rq *this_rq, struct rq_flags *rf){
     if (is_migrate_task(p, this_rq, busiest) && (bt_se->load.weight > max_weight)){
       migrate_task = p;
 			max_weight = bt_se->load.weight;
-			printk("cur migrate task %d, weight %lu\n", p->pid, max_weight);
+			// printk("cur migrate task %d, weight %lu\n", p->pid, max_weight);
     }
   }
   if (migrate_task) {
-		printk("start migrate\n");
+		// printk("start migrate\n");
     deactivate_task(busiest, migrate_task, 0);
-		printk("set_task_cpu\n");
+		// printk("set_task_cpu\n");
     // del_task->on_rq = TASK_ON_RQ_MIGRATING; //CFS中迁移进程的时候设置了这个状态位, 测试发现可以不加
     set_task_cpu(migrate_task, this_cpu);
-		printk("activate_task\n");
+		// printk("activate_task\n");
     activate_task(this_rq, migrate_task, 0);
     // del_task->on_rq = TASK_ON_RQ_QUEUED; //CFS
     pulled_task++;
     // check_preempt_curr(this_rq, del_task, 0); //CFS
-		printk("pull pid %d from %d to %d \n", migrate_task->pid, busiest->cpu, this_cpu);
+		// printk("pull pid %d from %d to %d \n", migrate_task->pid, busiest->cpu, this_cpu);
   } else {
-		printk("pull nothing from %d to %d \n", busiest->cpu, this_cpu);
+		// printk("pull nothing from %d to %d \n", busiest->cpu, this_cpu);
 	}
 
   double_rq_unlock(this_rq, busiest);
 	raw_spin_lock(&this_rq->lock);
   if (this_rq->nr_running != this_rq->bt.nr_running)
 		pulled_task = -1;
-	printk("balance compelate pulled %d\n", pulled_task);
+	// printk("balance compelate pulled %d\n", pulled_task);
 
   return pulled_task;
 }
